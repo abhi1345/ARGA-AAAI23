@@ -15,17 +15,37 @@ class ARCGraph:
     param_binding_ops = ["param_bind_neighbor_by_size", "param_bind_neighbor_by_color", "param_bind_node_by_shape",
                          "param_bind_node_by_size"]
     transformation_ops = {
-        "nbccg": ["update_color", "move_node", "extend_node", "move_node_max", "fill_rectangle", "hollow_rectangle",
-                  "add_border", "insert", "mirror", "flip", "rotate_node", "remove_node"],
-        "nbvcg": ["update_color", "move_node", "extend_node", "move_node_max", "remove_node"],
-        "nbhcg": ["update_color", "move_node", "extend_node", "move_node_max", "remove_node"],
-        "ccgbr": ["update_color", "remove_node"],
-        "ccgbr2": ["update_color", "remove_node"],
-        "ccg": ["update_color", "remove_node"],
-        "mcccg": ["move_node", "move_node_max", "rotate_node", "fill_rectangle", "add_border", "insert", "mirror",
-                  "flip", "remove_node"],
-        "na": ["flip", "rotate_node"],
-        "lrg": ["update_color", "move_node", "extend_node", "move_node_max"]}
+        "nbccg": ["update_color", "move_node", "extend_node", "move_node_max", 
+                  "fill_rectangle", "hollow_rectangle", "add_border", "insert", 
+                  "mirror", "flip", "rotate_node", "remove_node", "scale_node", 
+                  "duplicate_node", "swap_colors", "merge_nodes", "create_pattern", 
+                  "outline_node"],
+        
+        "ccgbr": ["update_color", "remove_node", "scale_node", "duplicate_node",
+                  "swap_colors", "merge_nodes", "outline_node"],
+        
+        "ccgbr2": ["update_color", "remove_node", "scale_node", "duplicate_node",
+                   "swap_colors", "merge_nodes", "outline_node"],
+        
+        "ccg": ["update_color", "remove_node", "scale_node"],
+        
+        "mcccg": ["move_node", "move_node_max", "rotate_node", "fill_rectangle",
+                  "add_border", "insert", "mirror", "flip", "remove_node", 
+                  "create_pattern", "outline_node"],
+        
+        "na": ["flip", "rotate_node", "mirror"],
+        
+        "nbvcg": ["update_color", "move_node", "extend_node", "move_node_max",
+                  "remove_node", "scale_node", "duplicate_node", "swap_colors",
+                  "merge_nodes", "create_pattern", "outline_node"],
+        
+        "nbhcg": ["update_color", "move_node", "extend_node", "move_node_max",
+                  "remove_node", "scale_node", "duplicate_node", "swap_colors",
+                  "merge_nodes", "create_pattern", "outline_node"],
+        
+        "lrg": ["update_color", "move_node", "extend_node", "move_node_max",
+                "fill_rectangle", "hollow_rectangle", "create_pattern"]
+    }
     dynamic_parameters = {"color", "direction", "point", "mirror_point", "mirror_direction", "mirror_axis"}
 
     def __init__(self, graph, name, image, abstraction=None):
@@ -894,3 +914,137 @@ class ARCGraph:
             else:
                 fig.savefig(self.save_dir + "/" + self.name)
         plt.close()
+
+    def scale_node(self, node, scale_factor: int):
+        """
+        Scale a node by a given factor, maintaining its center point
+        """
+        center_point = self.get_centroid(node)
+        new_nodes = []
+        
+        # Get relative positions from center
+        for sub_node in self.graph.nodes[node]["nodes"]:
+            rel_y = sub_node[0] - center_point[0]
+            rel_x = sub_node[1] - center_point[1]
+            
+            # Scale the relative positions
+            new_y = center_point[0] + (rel_y * scale_factor)
+            new_x = center_point[1] + (rel_x * scale_factor)
+            
+            # Add scaled position if within bounds
+            if self.check_inbound((new_y, new_x)):
+                new_nodes.append((new_y, new_x))
+        
+        if len(new_nodes) > 0:
+            self.graph.nodes[node]["nodes"] = new_nodes
+            self.graph.nodes[node]["size"] = len(new_nodes)
+        return self
+
+    def duplicate_node(self, node, offset_y: int, offset_x: int):
+        """
+        Create a copy of a node offset by given y,x coordinates
+        """
+        new_nodes = []
+        node_color = self.graph.nodes[node]["color"]
+        
+        for sub_node in self.graph.nodes[node]["nodes"]:
+            new_pos = (sub_node[0] + offset_y, sub_node[1] + offset_x)
+            if self.check_inbound(new_pos) and not self.check_pixel_occupied(new_pos):
+                new_nodes.append(new_pos)
+                
+        if len(new_nodes) > 0:
+            new_node_id = self.generate_node_id(node_color)
+            if self.is_multicolor:
+                self.graph.add_node(new_node_id, nodes=new_nodes, 
+                                  color=[node_color for _ in new_nodes],
+                                  size=len(new_nodes))
+            else:
+                self.graph.add_node(new_node_id, nodes=new_nodes,
+                                  color=node_color, size=len(new_nodes))
+        return self
+
+    def swap_colors(self, node1, node2):
+        """
+        Swap the colors of two nodes
+        """
+        color1 = self.graph.nodes[node1]["color"]
+        color2 = self.graph.nodes[node2]["color"]
+        
+        if self.is_multicolor:
+            self.graph.nodes[node1]["color"] = [color2 for _ in self.graph.nodes[node1]["nodes"]]
+            self.graph.nodes[node2]["color"] = [color1 for _ in self.graph.nodes[node2]["nodes"]]
+        else:
+            self.graph.nodes[node1]["color"] = color2
+            self.graph.nodes[node2]["color"] = color1
+        return self
+
+    def merge_nodes(self, node1, node2):
+        """
+        Merge two nodes into one, taking the union of their pixels and the color of node1
+        """
+        merged_nodes = list(set(self.graph.nodes[node1]["nodes"] + self.graph.nodes[node2]["nodes"]))
+        color = self.graph.nodes[node1]["color"]
+        
+        if self.is_multicolor:
+            self.graph.nodes[node1]["nodes"] = merged_nodes
+            self.graph.nodes[node1]["color"] = [color for _ in merged_nodes]
+            self.graph.nodes[node1]["size"] = len(merged_nodes)
+        else:
+            self.graph.nodes[node1]["nodes"] = merged_nodes
+            self.graph.nodes[node1]["size"] = len(merged_nodes)
+            
+        self.graph.remove_node(node2)
+        return self
+
+    def create_pattern(self, node, pattern_type: str):
+        """
+        Create a pattern (checkerboard, stripes, etc.) using the node's color and background color
+        """
+        if pattern_type not in ["checkerboard", "stripes_h", "stripes_v"]:
+            return self
+            
+        node_color = self.graph.nodes[node]["color"]
+        all_x = [n[1] for n in self.graph.nodes[node]["nodes"]]
+        all_y = [n[0] for n in self.graph.nodes[node]["nodes"]]
+        min_x, max_x = min(all_x), max(all_x)
+        min_y, max_y = min(all_y), max(all_y)
+        
+        new_nodes = []
+        for y in range(min_y, max_y + 1):
+            for x in range(min_x, max_x + 1):
+                if pattern_type == "checkerboard":
+                    if (x + y) % 2 == 0:
+                        new_nodes.append((y, x))
+                elif pattern_type == "stripes_h":
+                    if y % 2 == 0:
+                        new_nodes.append((y, x))
+                elif pattern_type == "stripes_v":
+                    if x % 2 == 0:
+                        new_nodes.append((y, x))
+                        
+        if len(new_nodes) > 0:
+            self.graph.nodes[node]["nodes"] = new_nodes
+            self.graph.nodes[node]["size"] = len(new_nodes)
+        return self
+
+    def outline_node(self, node):
+        """
+        Keep only the outline/border pixels of a node
+        """
+        border_pixels = []
+        interior_pixels = set()
+        
+        # Find interior pixels (those with neighbors in all 4 directions)
+        for sub_node in self.graph.nodes[node]["nodes"]:
+            y, x = sub_node
+            neighbors = [(y+1,x), (y-1,x), (y,x+1), (y,x-1)]
+            if all((n[0],n[1]) in self.graph.nodes[node]["nodes"] for n in neighbors):
+                interior_pixels.add(sub_node)
+                
+        # Keep only non-interior pixels
+        border_pixels = [p for p in self.graph.nodes[node]["nodes"] if p not in interior_pixels]
+        
+        if len(border_pixels) > 0:
+            self.graph.nodes[node]["nodes"] = border_pixels
+            self.graph.nodes[node]["size"] = len(border_pixels)
+        return self
